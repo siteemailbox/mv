@@ -1,150 +1,130 @@
 <?php
-if (!defined('ABSPATH')) exit;
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 
 class MV_Admin {
+
     public function __construct() {
-        add_action('admin_menu', array($this, 'add_admin_menu'));
-        add_action('admin_post_mv_toggle_vendor_status', array($this, 'toggle_vendor_status'));
-        add_action('admin_post_mv_reply_ticket', array($this, 'reply_ticket'));
+        add_action( 'admin_menu', array( $this, 'add_admin_menu' ) );
+        add_action( 'admin_init', array( $this, 'handle_vendor_status' ) );
+        // اضافه کردن ستون‌های اختصاصی به لیست کاربران
+        add_filter( 'manage_users_columns', array( $this, 'add_vendor_columns' ) );
+        add_filter( 'manage_users_custom_column', array( $this, 'render_vendor_columns' ), 10, 3 );
     }
 
     public function add_admin_menu() {
         add_menu_page(
-            'چند فروشندگی',
-            'چند فروشندگی',
-            'manage_woocommerce',
-            'mv-multivendor',
-            array($this, 'dashboard_page'),
-            'dashicons-groups',
-            30
-        );
-
-        add_submenu_page(
-            'mv-multivendor',
-            'مدیریت فروشندگان',
-            'فروشندگان',
-            'manage_woocommerce',
+            __( 'فروشگاه‌ها', 'mv-marketplace' ),
+            __( 'فروشگاه‌ها', 'mv-marketplace' ),
+            'manage_options',
             'mv-vendors',
-            array($this, 'vendors_page')
-        );
-
-        add_submenu_page(
-            'mv-multivendor',
-            'تیکت‌های پشتیبانی',
-            'تیکت‌ها',
-            'manage_woocommerce',
-            'mv-tickets',
-            array($this, 'tickets_page')
+            array( $this, 'render_vendors_list' ),
+            'dashicons-store',
+            56
         );
     }
 
-    public function dashboard_page() {
-        echo '<div class="wrap"><h1>داشبورد چندفروشندگی</h1>';
-        echo '<p>به پنل مدیریت افزونه چندفروشندگی خوش آمدید.</p>';
-        
-        global $wpdb;
-        $vendors_count = count_users()['total_users']; // ساده‌سازی شده
-        $tickets_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}mv_messages WHERE type = 'ticket'");
-        
-        echo '<div style="display:flex; gap:20px; margin-top:20px;">';
-        echo '<div style="background:#fff; padding:20px; border-left:4px solid #0073aa; flex:1;"><h3>فروشندگان</h3><p>مدیریت وضعیت فروشندگان</p><a href="?page=mv-vendors" class="button">مشاهده</a></div>';
-        echo '<div style="background:#fff; padding:20px; border-left:4px solid #d63638; flex:1;"><h3>تیکت‌ها</h3><p>' . $tickets_count . ' پیام جدید</p><a href="?page=mv-tickets" class="button">مشاهده</a></div>';
-        echo '</div></div>';
-    }
-
-    public function vendors_page() {
-        echo '<div class="wrap"><h1>مدیریت فروشندگان</h1>';
-        
-        $users = get_users(array('role' => 'vendor'));
-        
-        echo '<table class="wp-list-table widefat fixed striped">';
-        echo '<thead><tr><th>نام</th><th>نام کاربری</th><th>محصولات</th><th>وضعیت</th><th>عملیات</th></tr></thead><tbody>';
-        
-        foreach ($users as $user) {
-            $status = get_user_meta($user->ID, '_mv_account_status', true) ?: 'active';
-            $products_count = count_user_posts($user->ID, 'product');
-            $status_label = $status == 'active' ? '<span style="color:green">فعال</span>' : '<span style="color:red">غیرفعال</span>';
-            $action_label = $status == 'active' ? 'غیرفعال‌سازی' : 'فعال‌سازی';
-            $next_status = $status == 'active' ? 'inactive' : 'active';
-            
-            echo "<tr>";
-            echo "<td>{$user->display_name}</td>";
-            echo "<td>{$user->user_login}</td>";
-            echo "<td>{$products_count}</td>";
-            echo "<td>{$status_label}</td>";
-            echo "<td><a href='" . wp_nonce_url(admin_url('admin-post.php?action=mv_toggle_vendor_status&user_id=' . $user->ID . '&status=' . $next_status), 'mv_toggle_vendor') . "' class='button button-small'>{$action_label}</a></td>";
-            echo "</tr>";
+    public function render_vendors_list() {
+        // بررسی دسترسی
+        if ( ! current_user_can( 'manage_options' ) ) {
+            return;
         }
-        
-        echo '</tbody></table></div>';
-    }
 
-    public function toggle_vendor_status() {
-        if (!current_user_can('manage_woocommerce')) wp_die('دسترسی غیرمجاز');
-        
-        $user_id = intval($_GET['user_id']);
-        $status = sanitize_text_field($_GET['status']);
-        
-        check_admin_referer('mv_toggle_vendor');
-        
-        update_user_meta($user_id, '_mv_account_status', $status);
-        wp_redirect(admin_url('admin.php?page=mv-vendors&updated=1'));
-        exit;
-    }
-
-    public function tickets_page() {
-        echo '<div class="wrap"><h1>تیکت‌های پشتیبانی</h1>';
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'mv_messages';
-        $tickets = $wpdb->get_results("SELECT * FROM $table_name WHERE type = 'ticket' ORDER BY created_at DESC");
-        
-        echo '<table class="wp-list-table widefat fixed striped">';
-        echo '<thead><tr><th>فرستنده</th><th>موضوع (محصول)</th><th>پیام</th><th>تاریخ</th><th>پاسخ</th></tr></thead><tbody>';
-        
-        foreach ($tickets as $ticket) {
-            $user = get_userdata($ticket->sender_id);
-            $product = get_post($ticket->product_id);
-            $name = $user ? $user->display_name : 'ناشناس';
-            $prod_name = $product ? $product->post_title : 'حذف شده';
+        // هندل کردن اکشن‌های فعال/غیرفعال
+        if ( isset( $_GET['mv_action'] ) && isset( $_GET['vendor_id'] ) && wp_verify_nonce( $_GET['_wpnonce'], 'mv_vendor_action' ) ) {
+            $vendor_id = intval( $_GET['vendor_id'] );
+            $action = sanitize_text_field( $_GET['mv_action'] );
             
-            echo "<tr>";
-            echo "<td>{$name}</td>";
-            echo "<td>{$prod_name}</td>";
-            echo "<td>" . esc_html($ticket->message) . "</td>";
-            echo "<td>" . date_i18n('Y/m/d H:i', strtotime($ticket->created_at)) . "</td>";
-            echo "<td>";
-            if (!$ticket->is_read) {
-                echo '<form method="post" action="' . admin_url('admin-post.php') . '">';
-                echo '<input type="hidden" name="action" value="mv_reply_ticket">';
-                echo '<input type="hidden" name="ticket_id" value="' . $ticket->id . '">';
-                echo '<textarea name="reply" placeholder="پاسخ شما..." style="width:100%"></textarea>';
-                echo '<button type="submit" class="button button-small" style="margin-top:5px">ارسال پاسخ</button>';
-                echo '</form>';
-            } else {
-                echo '<span style="color:#aaa">پاسخ داده شده</span>';
+            if ( $action === 'activate' ) {
+                update_user_meta( $vendor_id, '_mv_vendor_status', 'active' );
+            } elseif ( $action === 'deactivate' ) {
+                update_user_meta( $vendor_id, '_mv_vendor_status', 'inactive' );
             }
-            echo "</td>";
-            echo "</tr>";
+            
+            echo '<div class="notice notice-success is-dismissible"><p>وضعیت فروشنده با موفقیت تغییر کرد.</p></div>';
         }
-        
-        echo '</tbody></table></div>';
+
+        ?>
+        <div class="wrap">
+            <h1><?php echo esc_html__( 'مدیریت فروشگاه‌ها', 'mv-marketplace' ); ?></h1>
+            <table class="wp-list-table widefat fixed striped">
+                <thead>
+                    <tr>
+                        <th><?php echo esc_html__( 'نام فروشنده', 'mv-marketplace' ); ?></th>
+                        <th><?php echo esc_html__( 'نام فروشگاه', 'mv-marketplace' ); ?></th>
+                        <th><?php echo esc_html__( 'ایمیل', 'mv-marketplace' ); ?></th>
+                        <th><?php echo esc_html__( 'وضعیت', 'mv-marketplace' ); ?></th>
+                        <th><?php echo esc_html__( 'تاریخ ثبت‌نام', 'mv-marketplace' ); ?></th>
+                        <th><?php echo esc_html__( 'عملیات', 'mv-marketplace' ); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php
+                    // اصلاح مهم: تغییر نقش از 'vendor' به 'mv_vendor'
+                    $args = array(
+                        'role' => 'mv_vendor', 
+                        'orderby' => 'registered',
+                        'order' => 'DESC'
+                    );
+                    $vendors = get_users( $args );
+
+                    if ( empty( $vendors ) ) {
+                        echo '<tr><td colspan="6">' . esc_html__( 'هیچ فروشنده‌ای یافت نشد.', 'mv-marketplace' ) . '</td></tr>';
+                    } else {
+                        foreach ( $vendors as $vendor ) {
+                            $shop_name = get_user_meta( $vendor->ID, '_mv_shop_name', true );
+                            $status = get_user_meta( $vendor->ID, '_mv_vendor_status', true );
+                            $status_label = ( $status === 'active' ) ? '<span style="color:green;">فعال</span>' : '<span style="color:red;">غیرفعال</span>';
+                            
+                            $nonce = wp_create_nonce( 'mv_vendor_action' );
+                            $action_link = ( $status === 'active' ) 
+                                ? "admin.php?page=mv-vendors&mv_action=deactivate&vendor_id={$vendor->ID}&_wpnonce={$nonce}"
+                                : "admin.php?page=mv-vendors&mv_action=activate&vendor_id={$vendor->ID}&_wpnonce={$nonce}";
+                            
+                            $action_text = ( $status === 'active' ) ? 'غیرفعال کردن' : 'فعال کردن';
+
+                            echo '<tr>';
+                            echo '<td>' . esc_html( $vendor->display_name ) . '</td>';
+                            echo '<td>' . esc_html( $shop_name ? $shop_name : '-' ) . '</td>';
+                            echo '<td>' . esc_html( $vendor->user_email ) . '</td>';
+                            echo '<td>' . $status_label . '</td>';
+                            echo '<td>' . date_i18n( 'Y/m/d', strtotime( $vendor->user_registered ) ) . '</td>';
+                            echo '<td><a href="' . esc_url( $action_link ) . '" class="button button-small">' . esc_html( $action_text ) . '</a></td>';
+                            echo '</tr>';
+                        }
+                    }
+                    ?>
+                </tbody>
+            </table>
+        </div>
+        <?php
     }
 
-    public function reply_ticket() {
-        if (!current_user_can('manage_woocommerce')) wp_die('دسترسی غیرمجاز');
-        
-        $ticket_id = intval($_POST['ticket_id']);
-        $reply = sanitize_textarea_field($_POST['reply']);
-        
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'mv_messages';
-        
-        $wpdb->update($table_name, 
-            ['message' => $reply, 'is_read' => 1], 
-            ['id' => $ticket_id]
-        );
-        
-        wp_redirect(admin_url('admin.php?page=mv-tickets&replied=1'));
-        exit;
+    public function add_vendor_columns( $columns ) {
+        $columns['mv_shop_name'] = __( 'نام فروشگاه', 'mv-marketplace' );
+        $columns['mv_vendor_status'] = __( 'وضعیت فروشنده', 'mv-marketplace' );
+        return $columns;
+    }
+
+    public function render_vendor_columns( $value, $column_name, $user_id ) {
+        // فقط برای نقش mv_vendor نمایش داده شود
+        $user = get_userdata( $user_id );
+        if ( ! in_array( 'mv_vendor', (array) $user->roles ) ) {
+            return $value;
+        }
+
+        if ( 'mv_shop_name' === $column_name ) {
+            return get_user_meta( $user_id, '_mv_shop_name', true );
+        }
+        if ( 'mv_vendor_status' === $column_name ) {
+            $status = get_user_meta( $user_id, '_mv_vendor_status', true );
+            return ( $status === 'active' ) ? 'فعال' : 'غیرفعال';
+        }
+        return $value;
+    }
+    
+    public function handle_vendor_status() {
+        // منطق اضافی اگر نیاز باشد
     }
 }
