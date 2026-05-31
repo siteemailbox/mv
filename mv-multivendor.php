@@ -3,7 +3,7 @@
  * Plugin Name: چندفروشندگی MV
  * Plugin URI: https://github.com/siteemailbox/mv-multivendor
  * Description: افزونه چندفروشندگی سبک و سریع برای ووکامرس - مدیریت محصولات، داشبورد فروشنده، سیستم تیکت و پنل مدیریت.
- * Version: 5.0.0
+ * Version: 6.0.0
  * Author: siteemailbox
  * Author URI: https://github.com/siteemailbox
  * Text Domain: mv-multivendor
@@ -13,7 +13,7 @@
 
 if (!defined('ABSPATH')) exit;
 
-define('MV_VERSION', '5.0.0');
+define('MV_VERSION', '6.0.0');
 define('MV_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('MV_PLUGIN_URL', plugin_dir_url(__FILE__));
 
